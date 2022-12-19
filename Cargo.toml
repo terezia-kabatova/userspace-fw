@@ -1,0 +1,10 @@
+[package]
+name = "userspace-fw"
+version = "0.1.0"
+edition = "2021"
+
+
+[dependencies]
+iptables = "0.5.0"
+nfq = "0.2.5"
+signal-hook = "0.3.14"
