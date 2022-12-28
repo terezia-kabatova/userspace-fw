@@ -1,4 +1,4 @@
-// helper enums for the PacketInfoenum
+// helper enums for the PacketInfo enum
 #[derive(Debug)]
 #[derive(PartialEq)]
 pub enum IPversions {
@@ -68,7 +68,15 @@ pub struct Rule {
 // currently supports only IPv4, rules for IPv6 need to be in separate structure, because of the IP address size (or change it here)
 impl Rule {
 
- pub fn new(permit: bool, version: IPversions, src_addr: u32, dst_addr: u32, src_mask: u32, dst_mask: u32, l4protocol: L4protocols, src_port: u16, dst_port: u16) -> Rule {
+ pub fn new(permit: bool,
+            version: IPversions,
+            src_addr: u32,
+            dst_addr: u32,
+            src_mask: u32,
+            dst_mask: u32,
+            l4protocol: L4protocols,
+            src_port: u16,
+            dst_port: u16) -> Rule {
         Rule {
             permit,
             version,
@@ -84,7 +92,8 @@ impl Rule {
 
     pub fn check_packet(&self, packet: &mut PacketInfo) -> bool {
         self.version == packet.version &&
-        self.src_addr & self.src_mask == packet.src_addr & self.src_mask && // we comapare only the part specified by subnet mask; TODO: the src_addr could be bitmasked in Rule constructor
+        // we comapare only the part specified by subnet mask; TODO: the src_addr could be bitmasked in Rule constructor
+        self.src_addr & self.src_mask == packet.src_addr & self.src_mask &&
         self.dst_addr & self.dst_mask == packet.dst_addr & self.dst_mask &&
         (self.l4protocol == L4protocols::Unknown ||
          (self.l4protocol == packet.l4protocol &&

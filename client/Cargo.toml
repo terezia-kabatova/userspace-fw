@@ -1,0 +1,8 @@
+[package]
+name = "userspace-fw-client"
+version = "0.1.0"
+edition = "2021"
+
+
+[dependencies]
+clap = { version = "4.0.30", features = ["derive"] }
