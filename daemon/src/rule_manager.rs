@@ -27,6 +27,10 @@ impl RuleManagerTrait for TreeRuleManager {
         Ok(())
     }
 
+    fn remove_rule_num(&mut self, rule: usize) -> Result<(), String> {
+        Ok(())
+    }
+
     fn check_packet(&self, packet: &mut shared::PacketInfo) -> nfq::Verdict {
         nfq::Verdict::Accept
     }
@@ -38,11 +42,12 @@ impl RuleManagerTrait for TreeRuleManager {
 
 // standard list implementation
 pub struct ListRuleManager  {
-    rules: Vec<shared::Rule>
+    rules: Vec<shared::Rule>,
+    default_verdict: nfq::Verdict
 }
 impl ListRuleManager {
-    pub(crate) fn new() -> ListRuleManager {
-        ListRuleManager { rules: Vec::new() }
+    pub(crate) fn new(default_action: nfq::Verdict) -> ListRuleManager {
+        ListRuleManager { rules: Vec::new(), default_verdict: default_action }
     }
 }
 
@@ -57,6 +62,11 @@ impl RuleManagerTrait for ListRuleManager {
         Ok(())
     }
 
+    fn remove_rule_num(&mut self, rule: usize) -> Result<(), String> {
+        self.rules.remove(rule);
+        Ok(())
+    }
+
     fn check_packet(&self, packet: &mut shared::PacketInfo) -> nfq::Verdict {
         for rule in self.rules.iter() {
             if rule.check_packet(packet) {
@@ -66,7 +76,7 @@ impl RuleManagerTrait for ListRuleManager {
                 return nfq::Verdict::Drop;
             }
         }
-        nfq::Verdict::Drop
+        self.default_verdict
     }
 
     fn show(&self) -> String {

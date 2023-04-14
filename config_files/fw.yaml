@@ -1,0 +1,10 @@
+# example daemon configuration
+# expected in /etc/usfw/
+
+# if true, daemon will manage its iptables rules and filter traffic from interfaces specified in filter section
+manage_iptables: true
+
+filter:
+  # filter incoming traffic on interface enp1s0
+  enp1s0:
+    [input]

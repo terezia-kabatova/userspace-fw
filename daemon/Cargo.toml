@@ -1,5 +1,5 @@
 [package]
-name = "userspace-fw-daemon"
+name = "daemon"
 version = "0.1.0"
 edition = "2021"
 
@@ -11,3 +11,5 @@ signal-hook = "0.3.14"
 shared = { path = "../shared" }
 serde = { version = "1.0.152", features = ["derive"] }
 serde_json = "1.0.91"
+yaml-rust = "0.4"
+network-interface = "1.0.0"

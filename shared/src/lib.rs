@@ -1,3 +1,5 @@
+extern crate serde;
+
 // helper enums for the PacketInfo enum
 #[derive(Debug)]
 #[derive(PartialEq)]
@@ -14,8 +16,10 @@ pub enum IPversions {
 pub enum L4protocols {
     TCP,
     UDP,
-    Unknown
+    Unknown,
+    ICMP,
 }
+
 
 #[derive(Debug)]
 pub enum PacketVerdict {
@@ -35,7 +39,8 @@ pub struct PacketInfo {
     pub dst_addr: u32,
     pub l4protocol: L4protocols,
     pub src_port: u16,
-    pub dst_port: u16
+    pub dst_port: u16,
+    pub icmp_type: u8
 }
 
 impl PacketInfo {
@@ -48,22 +53,14 @@ impl PacketInfo {
             l4protocol: L4protocols::Unknown,
             src_port: 0,
             dst_port: 0,
+            icmp_type: 0
         }
     }
 }
 
+
 #[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
-pub struct Rule {
-    permit: bool,
-    version: IPversions,
-    src_addr: u32,
-    src_mask: u32,
-    dst_addr: u32,
-    dst_mask: u32,
-    l4protocol: L4protocols,
-    src_port: u16,
-    dst_port: u16
-}
+pub struct Rule(bool, IPversions, u32, u32, u32, u32, L4protocols, u16, u16, u8);
 
 // checks whether packet matches the rule
 // currently supports only IPv4, rules for IPv6 will have to be in a separate structure, because of the IP address size (or change it here)
@@ -77,34 +74,51 @@ impl Rule {
                dst_mask: u32,
                l4protocol: L4protocols,
                src_port: u16,
-               dst_port: u16) -> Rule {
-        Rule {
-            permit,
-            version,
-            src_addr,
-            src_mask,
-            dst_addr,
-            dst_mask,
-            l4protocol,
-            src_port,
-            dst_port
-        }
+               dst_port: u16,
+               icmp_type: u8) -> Rule {
+        Rule(permit, version, src_addr, src_mask, dst_addr, dst_mask, l4protocol, src_port, dst_port, icmp_type)
     }
 
     pub fn check_packet(&self, packet: &mut PacketInfo) -> bool {
-        self.version == packet.version &&
+        self.1 == packet.version &&
         // we comapare only the part specified by subnet mask;
         // TODO: the src_addr could be bitmasked in Rule constructor
-        self.src_addr & self.src_mask == packet.src_addr & self.src_mask &&
-        self.dst_addr & self.dst_mask == packet.dst_addr & self.dst_mask &&
-        (self.l4protocol == L4protocols::Unknown ||
-         (self.l4protocol == packet.l4protocol &&
-          ((self.src_port == packet.src_port) || self.src_port == 0 ) && // the ports either match, or they are specified as 0 (don't care)
-          ((self.dst_port == packet.dst_port) || self.dst_port == 0 )))
+        self.2 & self.3 == packet.src_addr & self.3 &&
+        self.4 & self.5 == packet.dst_addr & self.5 &&
+        (self.6 == L4protocols::Unknown ||
+         (self.6 == packet.l4protocol &&
+          ((packet.l4protocol == L4protocols::ICMP && // icmp packet that matches type or the type is not specified in rule
+            self.9 == packet.icmp_type || self.9 == 0)
+           ||
+           (packet.l4protocol != L4protocols::ICMP &&
+            ((self.7 == packet.src_port) || self.7 == 0 ) && // the ports either match, or they are specified as 0 (don't care)
+            ((self.8 == packet.dst_port) || self.8 == 0 )))))
     }
 
     pub fn get_permit(&self) -> bool {
-        return self.permit;
+        return self.0;
+    }
+
+    pub fn to_string(&self) -> String {
+        let ip = serde_json::to_value(&self.1).unwrap().to_string();
+        let src = self.2.to_le_bytes().iter().map(|i| i.to_string()+".").collect::<String>();
+        let dst = self.4.to_le_bytes().iter().map(|i| i.to_string()+".").collect::<String>();
+        let prot = serde_json::to_value(&self.6).unwrap().to_string();
+        let details: String;
+        match self.6 {
+            L4protocols::Unknown => details = String::new(),
+            L4protocols::ICMP => details = format!("icmp type: {}", self.9),
+            _ => details = format!("src port: {} dst port: {}", self.7, self.8)
+        }
+        return format!("permit: {} {} src addr: {}/{} dst addr: {}/{} protocol: {} {}",
+            self.0,
+            ip,
+            src.trim_end_matches("."),
+            u32::count_ones(self.3),
+            dst.trim_end_matches("."),
+            u32::count_ones(self.5),
+            prot,
+            details)
     }
 }
 
@@ -112,16 +126,18 @@ impl Rule {
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 pub enum Action {
     Insert,
-    Delete
+    Delete,
+    DeleteNum,
+    List
 }
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 pub struct Msg {
     pub action: Action,
-    pub rule: Rule
+    pub payload: String
 }
 
 impl Msg {
-    pub fn new(action: Action, rule: Rule) -> Msg {
-        Msg { action, rule}
+    pub fn new(action: Action, rule: String) -> Msg {
+        Msg { action, payload: rule}
     }
 }
