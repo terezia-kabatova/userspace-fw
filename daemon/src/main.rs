@@ -429,14 +429,15 @@ impl Daemon {
                             }
                         }
                     }
+                    if active_filter.is_empty() {
+                        eprintln!("no valid interface-chain pair was specified, terminating");
+                        exit(1);
+                    }
                 }
-            }
+            },
             _ => (),
         }
-        if active_filter.is_empty() {
-            eprintln!("no valid interface-chain pair was specified, terminating");
-            exit(1);
-        }
+        
         println!("iptables config done");
 
         // start threads
