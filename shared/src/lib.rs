@@ -80,19 +80,30 @@ impl Rule {
     }
 
     pub fn check_packet(&self, packet: &mut PacketInfo) -> bool {
-        self.1 == packet.version &&
+        // the ip version does not match
+        if self.1 != packet.version {
+            return false;
+        }
+
         // we comapare only the part specified by subnet mask;
         // TODO: the src_addr could be bitmasked in Rule constructor
-        self.2 & self.3 == packet.src_addr & self.3 &&
-        self.4 & self.5 == packet.dst_addr & self.5 &&
-        (self.6 == L4protocols::Unknown ||
-         (self.6 == packet.l4protocol &&
-          ((packet.l4protocol == L4protocols::ICMP && // icmp packet that matches type or the type is not specified in rule
-            self.9 == packet.icmp_type || self.9 == 0)
-           ||
-           (packet.l4protocol != L4protocols::ICMP &&
-            ((self.7 == packet.src_port) || self.7 == 0 ) && // the ports either match, or they are specified as 0 (don't care)
-            ((self.8 == packet.dst_port) || self.8 == 0 )))))
+        
+        // src or dst address do not match
+        if self.2 & self.3 != packet.src_addr & self.3 || self.4 & self.5 != packet.dst_addr & self.5 {
+            return false;
+        }
+
+        // encapsulated protocol is ICMP
+        if self.6 == L4protocols::ICMP && self.6 == packet.l4protocol {
+            // icmp packet that matches type or the type is not specified in rule
+            return self.9 == 0 || self.9 == packet.icmp_type;
+        }
+        // UDP or TCP
+        if (self.6 == L4protocols::UDP || self.6 == L4protocols::TCP) && self.6 == packet.l4protocol {
+            // the ports either match, or they are specified as 0 (don't care)
+            return (self.7 == 0 || self.7 == packet.src_port) && (self.8 == 0 || self.8 == packet.dst_port);
+        }
+        return packet.l4protocol == L4protocols::Unknown;
     }
 
     pub fn get_permit(&self) -> bool {
