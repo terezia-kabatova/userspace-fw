@@ -296,48 +296,6 @@ impl Daemon {
         }
         let term = Arc::new(RwLock::new(term_rw));
 
-            // create shared linked list for storing rules
-        let rw_rules = Arc::new(RwLock::new(rule_manager::ListRuleManager::new(nfq::Verdict::Accept)));
-        let rules_1 = thread_safe_wrapper::ThreadSafeRead::new(Arc::clone(&rw_rules));
-
-        // --- add placeholder rules ---
-
-        // blocks all UDP packets with dst port 22
-        let rule = Rule::new(
-            false,
-            shared::IPversions::IPv4,
-            0b0, // -> 0.0.0.0
-            0,
-            0b0,
-            0,
-            shared::L4protocols::UDP,
-            0,
-            22,
-            0
-        );
-
-        // allows all TCP packets with dst port 22
-        let rule2 = Rule::new(
-                true,
-                shared::IPversions::IPv4,
-                0b0, // -> 0.0.0.0
-                0,
-                0b0,
-                0,
-                shared::L4protocols::TCP,
-                0,
-                22,
-                0
-        );
-
-        {
-            let mut rw = rw_rules.write().unwrap();
-            rw.add_rule(rule).unwrap();
-            rw.add_rule(rule2).unwrap();
-        }
-
-        println!("rules created");
-        // ---
 
 
         // initialize iptables rule
@@ -419,7 +377,7 @@ impl Daemon {
                         println!("{:?}", active_filter);
                         for chain in chains {
 
-                            let i2 = "-i ".to_owned() + &i + " -j NFQUEUE --queue-num 0";
+                            let i2 = "-i ".to_owned() + &i + " -j NFQUEUE --queue-num 0 --queue-bypass";
                             match ipt.append("filter", &chain, &i2) {
                                 Ok(_) => println!("iptables rule inserted successfully"),
                                 Err(e)=> {
@@ -440,6 +398,21 @@ impl Daemon {
         
         println!("iptables config done");
 
+
+        // load default action from config file
+        let mut defualt_action = Verdict::Accept;
+        if let Some(drop) = docs["drop_by_default"].as_bool() {
+            if drop {
+                defualt_action = Verdict::Drop;
+            }
+        }
+
+        // create shared linked list for storing rules
+        let rw_rules = Arc::new(RwLock::new(rule_manager::ListRuleManager::new(default_action)));
+        let rules_1 = thread_safe_wrapper::ThreadSafeRead::new(Arc::clone(&rw_rules));
+
+
+
         // start threads
         let term_1 = thread_safe_wrapper::ThreadSafeRead::new(Arc::clone(&term));
         let cmd_processor = thread::spawn(move || Self::socket_thread(term_1, rw_rules));
@@ -456,7 +429,7 @@ impl Daemon {
             Some(manage) => {
                 for iface in active_filter.keys() {
                     for chain in active_filter.get(iface).unwrap() {
-                        match ipt.delete("filter", chain, &("-i ".to_owned() + iface + " -j NFQUEUE --queue-num 0")) { // TODO: make this part into function, that can be called in case of catastrophe
+                        match ipt.delete("filter", chain, &("-i ".to_owned() + iface + " -j NFQUEUE --queue-num 0 --queue-bypass")) { // TODO: make this part into function, that can be called in case of catastrophe
                             Ok(_) => println!("done"),
                             Err(e) => println!("an error occurred while disconnecting from iptables: {}", e)
                         }

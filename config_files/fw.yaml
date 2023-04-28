@@ -4,6 +4,11 @@
 # if true, daemon will manage its iptables rules and filter traffic from interfaces specified in filter section
 manage_iptables: true
 
+# if true, the default action will be to drop packet, that does not match any rule
+# if false, these packets will be accepted
+# default value is false
+drop_by_default: false
+
 filter:
   # filter incoming traffic on interface enp1s0
   enp1s0:
