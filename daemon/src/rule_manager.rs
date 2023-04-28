@@ -4,14 +4,16 @@ will be instantiated in the main() in daemon/main.rs and sent to the threads
 */
 
 pub mod rule_manager_trait;
+
 use self::rule_manager_trait::RuleManagerTrait;
 
 
 // tree structure to be implemented
 #[derive(Debug)]
-pub struct TreeRuleManager  {
-    rules: Vec<shared::Rule>
+pub struct TreeRuleManager {
+    rules: Vec<shared::Rule>,
 }
+
 impl TreeRuleManager {
     pub fn new() -> TreeRuleManager {
         TreeRuleManager { rules: Vec::new() }
@@ -41,10 +43,11 @@ impl RuleManagerTrait for TreeRuleManager {
 }
 
 // standard list implementation
-pub struct ListRuleManager  {
+pub struct ListRuleManager {
     rules: Vec<shared::Rule>,
-    default_verdict: nfq::Verdict
+    default_verdict: nfq::Verdict,
 }
+
 impl ListRuleManager {
     pub(crate) fn new(default_action: nfq::Verdict) -> ListRuleManager {
         ListRuleManager { rules: Vec::new(), default_verdict: default_action }

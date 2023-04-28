@@ -6,7 +6,7 @@ extern crate serde;
 #[derive(serde::Serialize, serde::Deserialize)]
 pub enum IPversions {
     IPv4,
-    IPv6//,
+    IPv6,//,
     //Unknown
 }
 
@@ -25,9 +25,8 @@ pub enum L4protocols {
 pub enum PacketVerdict {
     Accept,
     Drop,
-    Undecided
+    Undecided,
 }
-
 
 
 // struct for collecting info about the currently evaluated packet
@@ -40,11 +39,10 @@ pub struct PacketInfo {
     pub l4protocol: L4protocols,
     pub src_port: u16,
     pub dst_port: u16,
-    pub icmp_type: u8
+    pub icmp_type: u8,
 }
 
 impl PacketInfo {
-
     pub fn new() -> PacketInfo {
         PacketInfo {
             version: IPversions::IPv4,
@@ -53,7 +51,7 @@ impl PacketInfo {
             l4protocol: L4protocols::Unknown,
             src_port: 0,
             dst_port: 0,
-            icmp_type: 0
+            icmp_type: 0,
         }
     }
 }
@@ -65,7 +63,6 @@ pub struct Rule(bool, IPversions, u32, u32, u32, u32, L4protocols, u16, u16, u8)
 // checks whether packet matches the rule
 // currently supports only IPv4, rules for IPv6 will have to be in a separate structure, because of the IP address size (or change it here)
 impl Rule {
-
     pub fn new(permit: bool,
                version: IPversions,
                src_addr: u32,
@@ -87,7 +84,7 @@ impl Rule {
 
         // we comapare only the part specified by subnet mask;
         // TODO: the src_addr could be bitmasked in Rule constructor
-        
+
         // src or dst address do not match
         if self.2 & self.3 != packet.src_addr & self.3 || self.4 & self.5 != packet.dst_addr & self.5 {
             return false;
@@ -112,8 +109,8 @@ impl Rule {
 
     pub fn to_string(&self) -> String {
         let ip = serde_json::to_value(&self.1).unwrap().to_string();
-        let src = self.2.to_le_bytes().iter().map(|i| i.to_string()+".").collect::<String>();
-        let dst = self.4.to_le_bytes().iter().map(|i| i.to_string()+".").collect::<String>();
+        let src = self.2.to_le_bytes().iter().map(|i| i.to_string() + ".").collect::<String>();
+        let dst = self.4.to_le_bytes().iter().map(|i| i.to_string() + ".").collect::<String>();
         let prot = serde_json::to_value(&self.6).unwrap().to_string();
         let details: String;
         match self.6 {
@@ -122,14 +119,14 @@ impl Rule {
             _ => details = format!("src port: {} dst port: {}", self.7, self.8)
         }
         return format!("permit: {} {} src addr: {}/{} dst addr: {}/{} protocol: {} {}",
-            self.0,
-            ip,
-            src.trim_end_matches("."),
-            u32::count_ones(self.3),
-            dst.trim_end_matches("."),
-            u32::count_ones(self.5),
-            prot,
-            details)
+                       self.0,
+                       ip,
+                       src.trim_end_matches("."),
+                       u32::count_ones(self.3),
+                       dst.trim_end_matches("."),
+                       u32::count_ones(self.5),
+                       prot,
+                       details);
     }
 }
 
@@ -139,16 +136,17 @@ pub enum Action {
     Insert,
     Delete,
     DeleteNum,
-    List
+    List,
 }
+
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 pub struct Msg {
     pub action: Action,
-    pub payload: String
+    pub payload: String,
 }
 
 impl Msg {
     pub fn new(action: Action, rule: String) -> Msg {
-        Msg { action, payload: rule}
+        Msg { action, payload: rule }
     }
 }
