@@ -3,10 +3,10 @@
 extern crate serde;
 extern crate yaml_rust;
 
-use yaml_rust::{YamlLoader, YamlEmitter};
+use rule_manager::rule_manager_trait::RuleManagerTrait;
+use yaml_rust::{YamlLoader};
 use nfq::{Queue, Verdict};
 use network_interface::{NetworkInterface, NetworkInterfaceConfig};
-use rule_manager::rule_manager_trait::RuleManagerTrait;
 use shared::Rule;
 use signal_hook::low_level::exit;
 use std::collections::HashMap;
@@ -16,6 +16,7 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::net::Shutdown;
 use std::io::{BufReader, BufRead, Write};
 use std::sync::{Arc, RwLock};
+use rule_manager::list_rule_manager;
 
 mod thread_safe_wrapper;
 mod rule_manager;
@@ -398,15 +399,15 @@ impl Daemon {
 
 
         // load default action from config file
-        let mut defualt_action = Verdict::Accept;
+        let mut default_action = Verdict::Accept;
         if let Some(drop) = docs["drop_by_default"].as_bool() {
             if drop {
-                defualt_action = Verdict::Drop;
+                default_action = Verdict::Drop;
             }
         }
 
         // create shared linked list for storing rules
-        let rw_rules = Arc::new(RwLock::new(rule_manager::ListRuleManager::new(default_action)));
+        let rw_rules = Arc::new(RwLock::new(list_rule_manager::ListRuleManager::new(default_action)));
         let rules_1 = thread_safe_wrapper::ThreadSafeRead::new(Arc::clone(&rw_rules));
 
 
