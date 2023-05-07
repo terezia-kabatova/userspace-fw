@@ -2,7 +2,7 @@ extern crate serde;
 
 // helper enums for the PacketInfo enum
 #[derive(Debug)]
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub enum IPversions {
     IPv4,
@@ -11,7 +11,7 @@ pub enum IPversions {
 }
 
 #[derive(Debug)]
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub enum L4protocols {
     TCP,
@@ -57,7 +57,7 @@ impl PacketInfo {
 }
 
 
-#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, PartialEq, Clone)]
 pub struct Rule(bool, IPversions, u32, u32, u32, u32, L4protocols, u16, u16, u8);
 
 // checks whether packet matches the rule
@@ -134,9 +134,13 @@ impl Rule {
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 pub enum Action {
     Insert,
+    InsertAt {
+        idx: usize
+    },
     Delete,
     DeleteNum,
     List,
+    Commit
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]

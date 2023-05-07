@@ -25,12 +25,23 @@ impl RuleManagerTrait for ListRuleManager {
         Ok(())
     }
 
+    fn add_rule_at(&mut self, idx: usize, rule: shared::Rule) -> Result<(), String> {
+        if idx >= self.rules.len() {
+            return Err("index out of bounds".to_string());
+        }
+        self.rules.insert(idx, rule);
+        Ok(())
+    }
+
     fn remove_rule(&mut self, rule: shared::Rule) -> Result<(), String> {
         self.rules.retain(|rul| rul != &rule);
         Ok(())
     }
 
     fn remove_rule_num(&mut self, rule: usize) -> Result<(), String> {
+        if rule >= self.rules.len() {
+            return Err("index out of bounds".to_string());
+        }
         self.rules.remove(rule);
         Ok(())
     }

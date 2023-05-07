@@ -52,8 +52,11 @@ pub struct RuleArgs {
 
 #[derive(clap::Subcommand, Debug, serde::Serialize)]
 pub enum ActionType {
-    /// Insert a new rule to the specified chain
+    /// Insert a new rule
     Insert {
+        /// index where the new rule should be inserted, if not specified, rule will be added at the end of the list
+        #[arg(short, required = false, default_value = None)]
+        at: Option<usize>,
         #[clap(flatten)]
         rule_args: RuleArgs
     },
@@ -72,6 +75,9 @@ pub enum ActionType {
 
     /// List rules from a specified chain or all if no chain is specified
     List,
+
+    /// Save the rules to a file
+    Commit
 }
 
 #[derive(clap::ValueEnum, Debug, Clone, serde::Serialize)]
@@ -207,9 +213,18 @@ fn main() {
     // interpret supplied arguments
     match &args.action_type {
         // insert
-        ActionType::Insert { rule_args } => {
-            let payload = serde_json::to_value(construct_rule(rule_args)).unwrap().to_string() + "\n";
-            let msg = shared::Msg::new(shared::Action::Insert, payload);
+        ActionType::Insert { rule_args, at: idx } => {
+            let msg: shared::Msg;
+            match idx {
+                Some(i) => {
+                    let payload = serde_json::to_value(construct_rule(rule_args)).unwrap().to_string() + "\n";
+                    msg = shared::Msg::new(shared::Action::InsertAt { idx: *i }, payload);
+                }
+                None => {
+                    let payload = serde_json::to_value(construct_rule(rule_args)).unwrap().to_string() + "\n";
+                    msg = shared::Msg::new(shared::Action::Insert, payload);
+                }
+            }
             println!("{}", send_to_daemon(msg));
         }
         ActionType::Delete { rule_args } => {
@@ -228,6 +243,10 @@ fn main() {
             for (i, rule) in rules.iter().enumerate() {
                 println!("[{}] {}", i, rule.to_string());
             }
+        }
+        ActionType::Commit => {
+            let msg = shared::Msg::new(shared::Action::Commit, String::new());
+            println!("{}", send_to_daemon(msg));
         }
     }
 }

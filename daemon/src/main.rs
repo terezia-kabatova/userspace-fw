@@ -4,12 +4,13 @@ extern crate serde;
 extern crate yaml_rust;
 
 use rule_manager::rule_manager_trait::RuleManagerTrait;
-use yaml_rust::{YamlLoader};
+use yaml_rust::YamlLoader;
 use nfq::{Queue, Verdict};
 use network_interface::{NetworkInterface, NetworkInterfaceConfig};
 use shared::Rule;
 use signal_hook::low_level::exit;
 use std::collections::HashMap;
+use std::fs::File;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::{thread, fs};
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -136,6 +137,18 @@ impl Daemon {
                 }
             }
 
+            shared::Action::InsertAt { idx } => {
+                let rule: Rule;
+                match serde_json::from_str::<Rule>(&parser_msg.payload) {
+                    Ok(r) => rule = r,
+                    Err(err_msg) => return Err(format!("an error occurred during rule deserialization: {}", err_msg.to_string()))
+                }
+                match write_rules.add_rule_at(idx, rule) {
+                    Ok(_) => (),
+                    Err(err_msg) => return Err(format!("an error occurred during rule insertion: {}", err_msg.to_string()))
+                }
+            }
+
             shared::Action::Delete => {
                 let rule: Rule;
                 match serde_json::from_str::<Rule>(&parser_msg.payload) {
@@ -163,6 +176,17 @@ impl Daemon {
             shared::Action::List => {
                 response = write_rules.show();
             }
+            shared::Action::Commit => {
+                match File::create("/etc/usfw/rules.conf") {
+                    Ok(mut rule_cfg) => {
+                        match rule_cfg.write(&write_rules.show().into_bytes()) {
+                            Ok(_) => (),
+                            Err(err_msg) => return Err(format!("Could not write to rule configuration file: {}", err_msg.to_string()))
+                        }
+                    },
+                    Err(err_msg) => return Err(format!("Could not open rule configuration file: {}", err_msg.to_string()))
+                }
+            },
         }
         println!("{}", write_rules.show());
         Ok(response)
@@ -171,7 +195,9 @@ impl Daemon {
     // function, that will run in the unix socket thread - used for communication with user
     fn socket_thread<RuleManager: RuleManagerTrait>(term: thread_safe_wrapper::ThreadSafeRead<Arc<AtomicBool>>, rules: Arc<RwLock<RuleManager>>) -> std::io::Result<()> {
         // the socket may or may not be present
-        std::fs::remove_file("/tmp/fw.sock");
+        match std::fs::remove_file("/tmp/fw.sock") {
+            _ => ()
+        }
         println!("starting socket thread");
         // initialize
         let listener = match UnixListener::bind("/tmp/fw.sock") {
@@ -180,7 +206,6 @@ impl Daemon {
         };
 
         // accept connections until SIGTERM is issued
-        // TODO: protocol documentation
         while !term.read().load(Ordering::Relaxed) {
             match listener.accept() {
                 Ok((mut socket, _addr)) => {
@@ -298,18 +323,7 @@ impl Daemon {
         }
         let term = Arc::new(RwLock::new(term_rw));
 
-
-        // initialize iptables rule
-        let ipt: iptables::IPTables;
-        match iptables::new(false) {
-            Ok(iptables) => ipt = iptables,
-            Err(msg) => {
-                eprintln!("an error occurred while initiating iptables object: {}", msg);
-                exit(1)
-            }
-        }
-
-        let interfaces = NetworkInterface::show().unwrap().iter().map(|i| i.name.clone()).collect::<Vec<String>>();
+        // load config file
         let config: String;
         match fs::read_to_string("/etc/usfw/fw.yaml") {
             Ok(cfg) => config = cfg,
@@ -318,6 +332,8 @@ impl Daemon {
                 exit(1)
             }
         }
+
+        // parse config file
         let docs: yaml_rust::Yaml;
         match YamlLoader::load_from_str(&config) {
             Ok(y) => docs = y[0].clone(),
@@ -326,6 +342,57 @@ impl Daemon {
                 exit(1)
             }
         }
+
+
+        // load default action from config file
+        let mut default_action = Verdict::Accept;
+        if let Some(drop) = docs["drop_by_default"].as_bool() {
+            if drop {
+                default_action = Verdict::Drop;
+            }
+        }
+
+        // create shared linked list for storing rules
+        let mut rules = list_rule_manager::ListRuleManager::new(default_action);
+
+
+        // read rules from file
+        match fs::read("/etc/usfw/rules.conf") {
+            Ok(rule_cfg) => {
+                let cfg_rules: Vec<shared::Rule> = serde_json::from_slice(&rule_cfg).unwrap();
+                for rule in cfg_rules.iter() {
+                    match rules.add_rule(rule.clone()) {
+                        Ok(_) => (),
+                        Err(err_msg) => eprintln!("Rule {} was not inserted successfuly: {}", rule.to_string(), err_msg),
+                    }
+                }
+            },
+            Err(_) => eprintln!("Could not open rule configuration file, starting with empty ruleset."),
+        }
+
+
+        // prepare rules for unix socket thread
+        let rw_rules = Arc::new(RwLock::new(rules));
+        let rules_1 = thread_safe_wrapper::ThreadSafeRead::new(Arc::clone(&rw_rules));
+
+
+        // start thread for unix socket
+        // rules in iptables are not configured yet, so in case of panic they are not left there
+        let term_1 = thread_safe_wrapper::ThreadSafeRead::new(Arc::clone(&term));
+        let cmd_processor = thread::spawn(move || Self::socket_thread(term_1, rw_rules));
+
+        // initialize iptables rule
+        let ipt: iptables::IPTables;
+        match iptables::new(false) {
+            Ok(iptables) => ipt = iptables,
+            Err(msg) => {
+                eprintln!("an error occurred while initiating iptables object: {}", msg);
+                stop_cmd_thread(cmd_processor);
+                exit(1)
+            }
+        }
+
+        let interfaces = NetworkInterface::show().unwrap().iter().map(|i| i.name.clone()).collect::<Vec<String>>();
 
         // prepare structures for parsing config file
         let mut active_filter: HashMap<String, Vec<String>> = HashMap::new();
@@ -397,23 +464,7 @@ impl Daemon {
 
         println!("iptables config done");
 
-
-        // load default action from config file
-        let mut default_action = Verdict::Accept;
-        if let Some(drop) = docs["drop_by_default"].as_bool() {
-            if drop {
-                default_action = Verdict::Drop;
-            }
-        }
-
-        // create shared linked list for storing rules
-        let rw_rules = Arc::new(RwLock::new(list_rule_manager::ListRuleManager::new(default_action)));
-        let rules_1 = thread_safe_wrapper::ThreadSafeRead::new(Arc::clone(&rw_rules));
-
-
-        // start threads
-        let term_1 = thread_safe_wrapper::ThreadSafeRead::new(Arc::clone(&term));
-        let cmd_processor = thread::spawn(move || Self::socket_thread(term_1, rw_rules));
+        // start thread for nfqueue
         let term_2 = thread_safe_wrapper::ThreadSafeRead::new(Arc::clone(&term));
         let queue_processor = thread::spawn(move || Self::queue_thread(term_2, rules_1));
 
@@ -423,44 +474,55 @@ impl Daemon {
             Err(e) => println!("an error occurred while ending the queue processing thread: {:?}", e)
         }
         println!("finishing");
-        match docs["manage_iptables"].as_bool() {
-            Some(manage) => {
+
+        remove_rules(docs, active_filter, ipt);
+
+        stop_cmd_thread(cmd_processor);
+
+        println!("ending main thread");
+        Ok(())
+    }
+}
+
+fn remove_rules(docs: yaml_rust::Yaml, active_filter: HashMap<String, Vec<String>>, ipt: iptables::IPTables) {
+    match docs["manage_iptables"].as_bool() {
+        Some(manage) => {
+            if manage {
                 for iface in active_filter.keys() {
                     for chain in active_filter.get(iface).unwrap() {
-                        match ipt.delete("filter", chain, &("-i ".to_owned() + iface + " -j NFQUEUE --queue-num 0 --queue-bypass")) { // TODO: make this part into function, that can be called in case of catastrophe
+                        match ipt.delete("filter", chain, &("-i ".to_owned() + iface + " -j NFQUEUE --queue-num 0 --queue-bypass")) {
                             Ok(_) => println!("done"),
                             Err(e) => println!("an error occurred while disconnecting from iptables: {}", e)
                         }
                     }
                 }
             }
-            _ => ()
         }
+        _ => ()
+    }
+}
 
-        // opens and closes connection to unix socket so the while loop is always terminated gracefully
-        let mut stream: UnixStream;
-        match UnixStream::connect("/tmp/fw.sock") {
-            Ok(sock) => stream = sock,
-            Err(msg) => {
-                eprintln!("an error occurred while connecting to the unix socket: {}", msg);
-                exit(1)
-            }
+fn stop_cmd_thread(cmd_processor: thread::JoinHandle<Result<(), std::io::Error>>) {
+    // opens and closes connection to unix socket so the while loop is always terminated gracefully
+    let mut stream: UnixStream;
+    match UnixStream::connect("/tmp/fw.sock") {
+        Ok(sock) => stream = sock,
+        Err(msg) => {
+            eprintln!("an error occurred while connecting to the unix socket: {}", msg);
+            exit(1)
         }
-        match stream.write(b"end\n") {
-            Ok(_) => (),
-            Err(err) => println!("{}", err)
-        }
-        match stream.shutdown(Shutdown::Both) {
-            Ok(_) => (),
-            Err(e) => println!("an error occurred while shutting down the socket: {}", e)
-        }
-        match cmd_processor.join() {
-            Ok(_) => println!("command processing thread finished"),
-            Err(e) => println!("an error occurred while ending the command processing thread: {:?}", e)
-        }
-
-        println!("ending main thread");
-        Ok(())
+    }
+    match stream.write(b"end\n") {
+        Ok(_) => (),
+        Err(err) => println!("{}", err)
+    }
+    match stream.shutdown(Shutdown::Both) {
+        Ok(_) => (),
+        Err(e) => println!("an error occurred while shutting down the socket: {}", e)
+    }
+    match cmd_processor.join() {
+        Ok(_) => println!("command processing thread finished"),
+        Err(e) => println!("an error occurred while ending the command processing thread: {:?}", e)
     }
 }
 
