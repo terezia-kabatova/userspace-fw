@@ -1,13 +1,15 @@
 extern crate serde;
 
+use crate::IPversions::IPv6;
+
 // helper enums for the PacketInfo enum
 #[derive(Debug)]
 #[derive(PartialEq, Clone)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub enum IPversions {
     IPv4,
-    IPv6,//,
-    //Unknown
+    IPv6,
+    Unknown
 }
 
 #[derive(Debug)]
@@ -31,7 +33,7 @@ pub enum PacketVerdict {
 
 // struct for collecting info about the currently evaluated packet
 // after all the info is collected, we compare it against the rules
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PacketInfo {
     pub version: IPversions,
     pub src_addr: u32,
@@ -45,7 +47,7 @@ pub struct PacketInfo {
 impl PacketInfo {
     pub fn new() -> PacketInfo {
         PacketInfo {
-            version: IPversions::IPv4,
+            version: IPversions::Unknown,
             src_addr: 0,
             dst_addr: 0,
             l4protocol: L4protocols::Unknown,
@@ -83,24 +85,26 @@ impl Rule {
         }
 
         // we comapare only the part specified by subnet mask;
-        // TODO: the src_addr could be bitmasked in Rule constructor
+        if self.1 == IPversions::IPv4 || self.1 == IPversions::IPv6 {
+            // src or dst address do not match
+            if self.2 & self.3 != packet.src_addr & self.3 || self.4 & self.5 != packet.dst_addr & self.5 {
+                return false;
+            }
 
-        // src or dst address do not match
-        if self.2 & self.3 != packet.src_addr & self.3 || self.4 & self.5 != packet.dst_addr & self.5 {
-            return false;
+            // encapsulated protocol is ICMP
+            if self.6 == L4protocols::ICMP && self.6 == packet.l4protocol {
+                // icmp packet that matches type or the type is not specified in rule
+                return self.9 == 0 || self.9 == packet.icmp_type;
+            }
+            // UDP or TCP
+            if (self.6 == L4protocols::UDP || self.6 == L4protocols::TCP) && self.6 == packet.l4protocol {
+                // the ports either match, or they are specified as 0 (don't care)
+                return (self.7 == 0 || self.7 == packet.src_port) && (self.8 == 0 || self.8 == packet.dst_port);
+            }
+            return packet.l4protocol == L4protocols::Unknown;
         }
-
-        // encapsulated protocol is ICMP
-        if self.6 == L4protocols::ICMP && self.6 == packet.l4protocol {
-            // icmp packet that matches type or the type is not specified in rule
-            return self.9 == 0 || self.9 == packet.icmp_type;
-        }
-        // UDP or TCP
-        if (self.6 == L4protocols::UDP || self.6 == L4protocols::TCP) && self.6 == packet.l4protocol {
-            // the ports either match, or they are specified as 0 (don't care)
-            return (self.7 == 0 || self.7 == packet.src_port) && (self.8 == 0 || self.8 == packet.dst_port);
-        }
-        return packet.l4protocol == L4protocols::Unknown;
+        // unknown IP version is a match
+        return true;
     }
 
     pub fn get_permit(&self) -> bool {
@@ -133,9 +137,8 @@ impl Rule {
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 pub enum Action {
-    Insert,
-    InsertAt {
-        idx: usize
+    Insert {
+        idx: Option<usize>
     },
     Delete,
     DeleteNum,

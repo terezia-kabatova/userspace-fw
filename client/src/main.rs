@@ -1,8 +1,13 @@
 /* client program */
 extern crate serde;
 
-use std::{os::unix::net::UnixStream, io::{Write, Read}};
 use clap::Parser;
+use shared::IPversions::IPv4;
+use shared::L4protocols::{TCP, UDP};
+use shared::{L4protocols, Rule};
+use crate::L4prot::ICMP;
+
+mod msg_sender;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -135,38 +140,10 @@ fn address_parser(input: &str) -> Result<u32, String> {
         }
     }
     // the array is converted to the binary representation of the address
-    return Ok(u32::from_le_bytes(address));
+    return Ok(u32::from_be_bytes(address));
 }
 
 
-fn send_to_daemon(message: shared::Msg) -> String {
-    // connect to daemon socket
-    let mut response: String = String::new();
-    let mut stream = match UnixStream::connect("/tmp/fw.sock") {
-        Ok(it) => it,
-        Err(_err) => {
-            println!("{}", _err);
-            return String::from("Could not connect to the socket");
-        }
-    };
-
-    // serialize the new rule and send through the socket
-    let v = serde_json::to_value(message).unwrap().to_string() + "\n";
-    match stream.write_all(&v.into_bytes()) {
-        Ok(it) => it,
-        Err(_err) => return String::from("Could not write to the socket"),
-    };
-
-    // receive response from daemon
-    match stream.read_to_string(&mut response) {
-        Ok(_) => {
-            return response;
-        }
-        Err(e) => {
-            return format!("Failed to receive data: {}", e);
-        }
-    }
-}
 
 fn construct_rule(rule_args: &RuleArgs) -> shared::Rule {
     let l4: shared::L4protocols;
@@ -215,30 +192,22 @@ fn main() {
         // insert
         ActionType::Insert { rule_args, at: idx } => {
             let msg: shared::Msg;
-            match idx {
-                Some(i) => {
-                    let payload = serde_json::to_value(construct_rule(rule_args)).unwrap().to_string() + "\n";
-                    msg = shared::Msg::new(shared::Action::InsertAt { idx: *i }, payload);
-                }
-                None => {
-                    let payload = serde_json::to_value(construct_rule(rule_args)).unwrap().to_string() + "\n";
-                    msg = shared::Msg::new(shared::Action::Insert, payload);
-                }
-            }
-            println!("{}", send_to_daemon(msg));
+            let payload = serde_json::to_value(construct_rule(rule_args)).unwrap().to_string() + "\n";
+            msg = shared::Msg::new(shared::Action::Insert { idx: *idx }, payload);
+            println!("{}", msg_sender::MsgSender::send_to_daemon(msg));
         }
         ActionType::Delete { rule_args } => {
             let payload = serde_json::to_value(construct_rule(rule_args)).unwrap().to_string() + "\n";
             let msg = shared::Msg::new(shared::Action::Delete, payload);
-            println!("{}", send_to_daemon(msg));
+            println!("{}",  msg_sender::MsgSender::send_to_daemon(msg));
         }
         ActionType::DeleteNum { rule_num } => {
             let msg = shared::Msg::new(shared::Action::DeleteNum, rule_num.to_string());
-            println!("{}", send_to_daemon(msg));
+            println!("{}",  msg_sender::MsgSender::send_to_daemon(msg));
         }
         ActionType::List => {
             let msg = shared::Msg::new(shared::Action::List, String::new());
-            let rules_serial = send_to_daemon(msg).into_bytes();
+            let rules_serial =  msg_sender::MsgSender::send_to_daemon(msg).into_bytes();
             let rules: Vec<shared::Rule> = serde_json::from_slice(&rules_serial).unwrap();
             for (i, rule) in rules.iter().enumerate() {
                 println!("[{}] {}", i, rule.to_string());
@@ -246,10 +215,48 @@ fn main() {
         }
         ActionType::Commit => {
             let msg = shared::Msg::new(shared::Action::Commit, String::new());
-            println!("{}", send_to_daemon(msg));
+            println!("{}",  msg_sender::MsgSender::send_to_daemon(msg));
         }
     }
 }
 
-//#[cfg(test)]
-//mod client_tests;
+#[test]
+fn test_address_parser() {
+    assert_eq!(address_parser("s4ect"), Err(String::from("The address does not have exactly four parts. (delimited by .)")));
+    assert_eq!(address_parser("1.1.1.256"), Err(String::from("Part of the address is not a number between 0 and 255.")));
+    assert_eq!(address_parser("-1.1.1.256"), Err(String::from("Part of the address is not a number between 0 and 255.")));
+    assert_eq!(address_parser("192.168.1.1"), Ok(3232235777));
+}
+
+#[test]
+fn test_mask_parser() {
+    assert_eq!(mask_parser("45"), Err(String::from("The mask has too many bits.")));
+    assert_eq!(mask_parser("a"), Err(String::from("The mask is not a valid number.")));
+    assert_eq!(mask_parser("0"), Ok(0));
+    assert_eq!(mask_parser("16"), Ok(65535));
+}
+
+
+#[test]
+fn test_rule_constructor() {
+    let mut args = RuleArgs{
+        protocol: L4prot::TCP,
+        action: Verdict::Accept,
+        src_addr: 1,
+        dst_addr: 2,
+        src_mask: 3,
+        dst_mask: 4,
+        src_port: 5,
+        dst_port: 6,
+        icmp_type: 7
+    };
+    // ICMP type is ignored when L4 protocol is TCP or UDP
+    assert_eq!(construct_rule(&args), Rule::new(true, IPv4, 1, 2, 3, 4, TCP, 5, 6, 0));
+
+    args.protocol = L4prot::UDP;
+    assert_eq!(construct_rule(&args), Rule::new(true, IPv4, 1, 2, 3, 4, L4protocols::UDP, 5, 6, 0));
+
+    // ports are ignored when L4 protocol is ICMP
+    args.protocol = ICMP;
+    assert_eq!(construct_rule(&args), Rule::new(true, IPv4, 1, 2, 3, 4, L4protocols::ICMP, 0, 0, 7));
+}
