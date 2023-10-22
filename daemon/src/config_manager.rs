@@ -175,7 +175,11 @@ impl ConfigManager {
     pub fn load_fw_rules(rules: &mut Arc<RwLock<dyn RuleManagerTrait>>) -> Result<(), String> {
         match fs::read("/etc/usfw/rules.conf") {
             Ok(rule_cfg) => {
-                let cfg_rules: Vec<shared::Rule> = serde_json::from_slice(&rule_cfg).unwrap();
+                let cfg_rules: Vec<shared::Rule>;
+                match serde_json::from_slice(&rule_cfg) {
+                    Ok(rules) => cfg_rules = rules,
+                    Err(err) => return Err(format!("The rules in config file do not have correct format."))
+                }
                 let mut rw_rules = rules.write().unwrap();
                 for rule in cfg_rules.iter() {
                     let idx = rw_rules.get_rule_count();

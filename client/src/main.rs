@@ -2,10 +2,11 @@
 extern crate serde;
 
 use clap::Parser;
-use shared::IPversions::IPv4;
 use shared::L4protocols::{TCP, UDP};
-use shared::{L4protocols, Rule};
+use shared::{IPmask, L3, L4protocols, Rule};
 use crate::L4prot::ICMP;
+use std::net::{IpAddr, Ipv4Addr};
+use std::net::Ipv6Addr;
 
 mod msg_sender;
 
@@ -152,18 +153,21 @@ fn construct_rule(rule_args: &RuleArgs) -> shared::Rule {
     let mut icmp: u8 = 0;
     match rule_args.protocol {
         L4prot::TCP => {
-            l4 = shared::L4protocols::TCP;
-            dst = rule_args.dst_port;
-            src = rule_args.src_port
+            l4 = shared::L4protocols::TCP {
+                src_port: rule_args.src_port,
+                dst_port: rule_args.dst_port
+            };
         }
         L4prot::UDP => {
-            l4 = shared::L4protocols::UDP;
-            dst = rule_args.dst_port;
-            src = rule_args.src_port
+            l4 = shared::L4protocols::UDP {
+                src_port: rule_args.src_port,
+                dst_port: rule_args.dst_port
+            };
         }
         L4prot::ICMP => {
-            l4 = shared::L4protocols::ICMP;
-            icmp = rule_args.icmp_type;
+            l4 = shared::L4protocols::ICMP {
+                icmp_type: rule_args.icmp_type
+            }
         }
         _ => l4 = shared::L4protocols::Unknown
     }
@@ -172,17 +176,10 @@ fn construct_rule(rule_args: &RuleArgs) -> shared::Rule {
         Verdict::Accept => verdict = true,
         Verdict::Drop => verdict = false
     }
-    return shared::Rule::new(
-        verdict,
-        shared::IPversions::IPv4,
-        rule_args.src_addr.clone(),
-        rule_args.dst_addr.clone(),
-        rule_args.src_mask.clone(),
-        rule_args.dst_mask.clone(),
-        l4,
-        src,
-        dst,
-        icmp);
+    return shared::Rule::new(verdict,
+                             L3{ src_addr: IpAddr::V4(Ipv4Addr::from(rule_args.src_addr)), dst_addr: IpAddr::V4(Ipv4Addr::from(rule_args.dst_addr)) },
+                             l4,
+                             IPmask::IPv4 { 0: rule_args.src_mask, 1: rule_args.dst_mask }).unwrap();
 }
 
 fn main() {
@@ -251,12 +248,24 @@ fn test_rule_constructor() {
         icmp_type: 7
     };
     // ICMP type is ignored when L4 protocol is TCP or UDP
-    assert_eq!(construct_rule(&args), Rule::new(true, IPv4, 1, 2, 3, 4, TCP, 5, 6, 0));
+    assert_eq!(construct_rule(&args),
+               Rule::new(true,
+                         IPv4 { src_addr: Ipv4Addr::from(1), dst_addr: Ipv4Addr::from(2) },
+                         L4protocols::TCP { src_port: 5, dst_port: 6 },
+                         IPmask::IPv4 { 0: 3, 1: 4 }).unwrap());
 
     args.protocol = L4prot::UDP;
-    assert_eq!(construct_rule(&args), Rule::new(true, IPv4, 1, 2, 3, 4, L4protocols::UDP, 5, 6, 0));
+    assert_eq!(construct_rule(&args),
+               Rule::new(true,
+                         IPv4 { src_addr: Ipv4Addr::from(1), dst_addr: Ipv4Addr::from(2) },
+                         L4protocols::UDP { src_port: 5, dst_port: 6 },
+                         IPmask::IPv4 { 0: 3, 1: 4 }).unwrap());
 
     // ports are ignored when L4 protocol is ICMP
     args.protocol = ICMP;
-    assert_eq!(construct_rule(&args), Rule::new(true, IPv4, 1, 2, 3, 4, L4protocols::ICMP, 0, 0, 7));
+    assert_eq!(construct_rule(&args),
+               Rule::new(true,
+                         IPv4 { src_addr: Ipv4Addr::from(1), dst_addr: Ipv4Addr::from(2) },
+                         L4protocols::ICMP {icmp_type: 7},
+                         IPmask::IPv4 { 0: 3, 1: 4 }).unwrap());
 }

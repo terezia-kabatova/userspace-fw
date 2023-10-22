@@ -54,7 +54,10 @@ impl ComponentFactoryTrait for RealComponentFactory {
     fn get_rule_manager(&mut self) -> Arc<RwLock<dyn RuleManagerTrait>> {
         let mut rules = Arc::new(RwLock::new(ListRuleManager::new(Accept))) as Arc<RwLock<dyn RuleManagerTrait>>;
         rules.write().unwrap().set_default_action(self.cfg_manager.get_default_action()).unwrap();
-        ConfigManager::load_fw_rules(&mut rules).unwrap();
+        match ConfigManager::load_fw_rules(&mut rules) {
+            Ok(_) => (),
+            Err(err) => println!("could not load rules from config file: {}", err)
+        }
         return rules;
     }
 }
